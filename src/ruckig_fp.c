@@ -131,6 +131,7 @@ static bool compute_segments(SCurveProfile *prof, int offset,
     }
     if (d_coast < FP_ZERO) d_coast = FP_ZERO;
 
+    /* Coast time; guard against zero v_peak to avoid division by zero */
     fp_t t4 = (v_peak > FP_EPS) ? fp_div(d_coast, v_peak) : FP_ZERO;
 
     /* Decompose acceleration ramp into segments 1,2,3 */
@@ -225,7 +226,7 @@ bool ruckig_fp_calculate(const RuckigFpInput *inp, RuckigFpOutput *out)
 
     if (fp_abs(inp->a0) > FP_EPS) {
         fp_t a0_abs = fp_abs(inp->a0);
-        j_pre = (inp->a0 > 0) ? -J : +J;
+        j_pre = (inp->a0 > 0) ? -J : +J;  /* -sign(a0)*J drives acceleration to zero */
         t_pre = fp_div(a0_abs, J);
 
         fp_t t_pre2 = fp_mul(t_pre, t_pre);
@@ -240,8 +241,9 @@ bool ruckig_fp_calculate(const RuckigFpInput *inp, RuckigFpOutput *out)
               + fp_div(fp_mul(inp->a0, t_pre2), FP_TWO)
               + fp_div(fp_mul(j_pre, t_pre3), FP_SIX);
 
-        /* Safety: reject if zeroing a0 would violate velocity limits */
-        if (v_eff > Vmax + FP_EPS || v_eff < -Vmax - FP_EPS) {
+        /* Safety: reject if zeroing a0 would violate velocity limits.
+         * Use the actual per-axis limits (which may be asymmetric). */
+        if (v_eff > inp->v_max + FP_EPS || v_eff < inp->v_min - FP_EPS) {
             return false;
         }
 
@@ -269,22 +271,6 @@ bool ruckig_fp_calculate(const RuckigFpInput *inp, RuckigFpOutput *out)
     fp_t dp = inp->pf - p_eff;
 
     /* ------------------------------------------------------------------
-     * Trivial case: zero (or near-zero) remaining displacement
-     * ---------------------------------------------------------------- */
-    if (fp_abs(dp) <= FP_EPS && fp_abs(v_eff - inp->vf) <= FP_EPS) {
-        /* Nothing left to do; fill 7 zero-duration main segments */
-        int off = n_pre;
-        for (int i = 0; i < SCURVE_SEGMENTS; i++) {
-            prof->t[off + i] = FP_ZERO;
-            prof->j[off + i] = FP_ZERO;
-        }
-        prof->n_segs = n_pre + SCURVE_SEGMENTS;
-        profile_integrate(prof);
-        out->valid = true;
-        return true;
-    }
-
-    /* ------------------------------------------------------------------
      * Determine motion direction from the remaining displacement
      * ---------------------------------------------------------------- */
     int dir;
@@ -293,8 +279,20 @@ bool ruckig_fp_calculate(const RuckigFpInput *inp, RuckigFpOutput *out)
     } else if (dp < -FP_EPS) {
         dir = -1;
     } else {
-        /* dp ≈ 0 but velocities differ: fall through to main planner with
-         * direction from the velocity difference */
+        /* dp ≈ 0: treat as trivial if the velocity difference is also negligible */
+        if (fp_abs(inp->vf - v_eff) <= FP_EPS) {
+            /* Nothing left to do; fill 7 zero-duration main segments */
+            int off = n_pre;
+            for (int i = 0; i < SCURVE_SEGMENTS; i++) {
+                prof->t[off + i] = FP_ZERO;
+                prof->j[off + i] = FP_ZERO;
+            }
+            prof->n_segs = n_pre + SCURVE_SEGMENTS;
+            profile_integrate(prof);
+            out->valid = true;
+            return true;
+        }
+        /* dp ≈ 0 but velocities differ: choose direction from velocity delta */
         dir = (inp->vf >= v_eff) ? 1 : -1;
     }
 

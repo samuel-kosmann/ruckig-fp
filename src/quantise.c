@@ -103,8 +103,17 @@ bool dsq_next_step_time(DistStepQuantiser *q, fp_t *step_time)
     if (q->profile->vel_mode) {
         /* Estimate upper bound: time for linear extrapolation to reach pos */
         fp_t v_cruise = q->profile->v[n];
-        if (fp_abs(v_cruise) > FP_ZERO) {
+        if (q->next_step_pos <= p_final) {
+            /* Step is within the planned profile — use normal upper bound */
+            hi = total;
+        } else if (fp_abs(v_cruise) > FP_ZERO) {
+            /* Step is beyond the profile end; extrapolate using cruise speed.
+             * If the axis is not moving toward the step (opposite sign), stop. */
             fp_t t_extra = fp_div(q->next_step_pos - p_final, v_cruise);
+            if (t_extra < FP_ZERO) {
+                q->finished = true;
+                return false;
+            }
             hi = total + fp_max(t_extra + FP_ONE, FP_ONE);
         } else {
             /* Axis stopped; no more steps possible */

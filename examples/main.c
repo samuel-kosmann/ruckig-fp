@@ -125,7 +125,10 @@ static void example_replan(void)
         return;
     }
 
-    /* Sample the state at t = 0.3 s (mid-acceleration, non-zero acc) */
+    /* Sample the state at t = 0.3 s.
+     * For the 0→1000 move with the chosen limits, t=0.3 s falls in the
+     * const-acceleration phase (segment 1), where acc = a_max = 500.
+     * The replan at this instant exercises the non-zero a0 code path. */
     fp_t t_replan = FP_FROM_FLOAT(0.3f);
     fp_t snap_pos, snap_vel, snap_acc;
     profile_at_time(&out1.profile, t_replan, &snap_pos, &snap_vel, &snap_acc);

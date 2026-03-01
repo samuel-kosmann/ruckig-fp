@@ -48,15 +48,16 @@ extern "C" {
 /**
  * @brief Maximum number of segments that a profile may contain.
  *
- * Up to 9 segments are used when a non-zero initial acceleration (`a0`) is
- * present (one prepended "zeroing" segment before the standard 7-segment
- * S-curve) and/or when a non-zero final acceleration (`af`) is requested
- * (one appended "ramping" segment).
+ * Up to 8 segments are used when a non-zero initial acceleration (`a0`) is
+ * present: one prepended "zeroing" segment before the standard 7-segment
+ * S-curve.
  *
  *   n_segs breakdown:
- *     7 = standard S-curve (a0 == 0, af == 0)
- *     8 = one pre-segment (a0 != 0) OR one post-segment (af != 0)
- *     9 = both pre- and post-segments
+ *     7 = standard S-curve (a0 == 0)
+ *     8 = one pre-segment (a0 != 0)
+ *
+ * The constant is defined as 9 (one spare) so that future support for a
+ * post-segment (af != 0) can be added without changing the struct size.
  */
 #define SCURVE_MAX_SEGMENTS 9
 
