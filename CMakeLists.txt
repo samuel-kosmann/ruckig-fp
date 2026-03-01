@@ -35,6 +35,11 @@ option(BUILD_EXAMPLES
     OFF
 )
 
+option(BUILD_IMGUI_DEMO
+    "Build the interactive ImGui S-curve visualiser (requires GLFW + OpenGL 3, C++ compiler)"
+    OFF
+)
+
 # ---------------------------------------------------------------------------
 # ruckig_fp static library
 # ---------------------------------------------------------------------------
@@ -78,6 +83,50 @@ if(BUILD_EXAMPLES)
         pico_add_extra_outputs(ruckig_fp_example)
         target_link_libraries(ruckig_fp_example PRIVATE pico_stdlib)
     endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Optional ImGui interactive demo
+# ---------------------------------------------------------------------------
+if(BUILD_IMGUI_DEMO)
+    # Require C++ for the demo (the core library remains pure C)
+    enable_language(CXX)
+    set(CMAKE_CXX_STANDARD 17)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+    find_package(OpenGL REQUIRED)
+    find_package(glfw3  REQUIRED)
+
+    # Locate the system ImGui static library and headers.
+    # Ubuntu 24.04 ships imgui 1.90.1 via libimgui-dev.
+    find_library(IMGUI_LIBRARY imgui REQUIRED)
+    find_path(IMGUI_INCLUDE_DIR imgui/imgui.h REQUIRED)
+
+    # ImPlot is vendored under examples/imgui_demo/implot/
+    set(IMPLOT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples/imgui_demo/implot)
+
+    add_executable(ruckig_fp_imgui_demo
+        examples/imgui_demo/main.cpp
+        ${IMPLOT_DIR}/implot.cpp
+        ${IMPLOT_DIR}/implot_items.cpp
+    )
+
+    target_include_directories(ruckig_fp_imgui_demo PRIVATE
+        ${IMGUI_INCLUDE_DIR}          # so #include <imgui/imgui.h> works
+        ${IMGUI_INCLUDE_DIR}/imgui    # so #include "imgui.h" works (backend headers)
+        ${IMPLOT_DIR}
+    )
+
+    target_link_libraries(ruckig_fp_imgui_demo PRIVATE
+        ruckig_fp
+        ${IMGUI_LIBRARY}
+        glfw
+        OpenGL::GL
+        stb
+    )
+
+    # Suppress pedantic/extra warnings for the demo (third-party code)
+    target_compile_options(ruckig_fp_imgui_demo PRIVATE -Wno-unused-parameter)
 endif()
 
 # ---------------------------------------------------------------------------

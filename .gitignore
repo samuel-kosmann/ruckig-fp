@@ -21,12 +21,16 @@ Makefile
 *.map
 *.lst
 ruckig_fp_example
+ruckig_fp_imgui_demo
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# ImGui user-specific layout preferences
+imgui.ini
 
 # macOS
 .DS_Store
