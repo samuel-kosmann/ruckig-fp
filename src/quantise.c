@@ -23,29 +23,32 @@ void tsq_init(TimeStepQuantiser *q, const SCurveProfile *prof, fp_t dt)
 bool tsq_step(TimeStepQuantiser *q, fp_t *pos, fp_t *vel, fp_t *acc)
 {
     if (q->finished) {
-        /* Return the final state when already finished */
-        if (pos) *pos = q->profile->p[SCURVE_SEGMENTS];
-        if (vel) *vel = q->profile->v[SCURVE_SEGMENTS];
-        if (acc) *acc = q->profile->a[SCURVE_SEGMENTS];
+        /* Return the final state when already finished (not vel_mode) */
+        int n = q->profile->n_segs;
+        if (pos) *pos = q->profile->p[n];
+        if (vel) *vel = q->profile->v[n];
+        if (acc) *acc = q->profile->a[n];
         return false;
     }
 
     fp_t total = profile_total_duration(q->profile);
 
-    /* Evaluate the profile at the current time */
+    /* Evaluate the profile at the current time.
+     * In vel_mode, profile_at_time() extrapolates beyond total. */
     profile_at_time(q->profile, q->current_time, pos, vel, acc);
 
     /* Advance the time cursor */
     q->current_time += q->dt;
 
-    /* Check for completion */
+    /* In velocity mode the trajectory never ends; always return true. */
+    if (q->profile->vel_mode) {
+        return true;
+    }
+
+    /* Mark finished once we have stepped past the end */
     if (q->current_time >= total) {
         q->current_time = total;
         q->finished = true;
-        /* Return true for the last valid sample, but mark finished so the
-         * next call returns false.  We already evaluated above, so return
-         * true this time (caller gets this sample). */
-        return true;
     }
 
     return true;
@@ -72,25 +75,47 @@ bool dsq_next_step_time(DistStepQuantiser *q, fp_t *step_time)
         return false;
     }
 
-    fp_t total = profile_total_duration(q->profile);
+    fp_t total   = profile_total_duration(q->profile);
+    int  n       = q->profile->n_segs;
+    fp_t p_final = q->profile->p[n];
 
-    /* Check whether the next step position is reachable at all */
-    fp_t p_final = q->profile->p[SCURVE_SEGMENTS];
-    if (q->next_step_pos > p_final + (q->step_size >> 1)) {
-        q->finished = true;
-        return false;
+    /* ---------------------------------------------------------------
+     * Is the next step position reachable?
+     * In velocity mode the position grows without bound, so the step
+     * is always reachable.  Without velocity mode, check the endpoint.
+     * ------------------------------------------------------------- */
+    if (!q->profile->vel_mode) {
+        if (q->next_step_pos > p_final + (q->step_size >> 1)) {
+            q->finished = true;
+            return false;
+        }
     }
 
-    /* ------------------------------------------------------------------
-     * Bisection search for t such that position(t) == next_step_pos.
+    /* ---------------------------------------------------------------
+     * Bisection search for t such that p(t) == next_step_pos.
      *
-     * We search in the interval [current_time, total_duration].
-     * Invariant: p(lo) < next_step_pos <= p(hi).
-     * ---------------------------------------------------------------- */
+     * In velocity mode, extend the upper bound well beyond total so the
+     * linear extrapolation can be reached.
+     * ------------------------------------------------------------- */
     fp_t lo = q->current_time;
-    fp_t hi = total;
+    fp_t hi;
 
-    /* Verify the upper bound can satisfy the invariant */
+    if (q->profile->vel_mode) {
+        /* Estimate upper bound: time for linear extrapolation to reach pos */
+        fp_t v_cruise = q->profile->v[n];
+        if (fp_abs(v_cruise) > FP_ZERO) {
+            fp_t t_extra = fp_div(q->next_step_pos - p_final, v_cruise);
+            hi = total + fp_max(t_extra + FP_ONE, FP_ONE);
+        } else {
+            /* Axis stopped; no more steps possible */
+            q->finished = true;
+            return false;
+        }
+    } else {
+        hi = total;
+    }
+
+    /* Verify the upper bound satisfies the invariant p(hi) >= next_step_pos */
     fp_t p_hi = FP_ZERO;
     profile_at_time(q->profile, hi, &p_hi, NULL, NULL);
     if (p_hi < q->next_step_pos - (q->step_size >> 1)) {
@@ -98,25 +123,20 @@ bool dsq_next_step_time(DistStepQuantiser *q, fp_t *step_time)
         return false;
     }
 
-    /* 32 iterations: each halves the interval, giving sub-LSB precision */
+    /* 32 iterations give sub-LSB precision for Q16.16 */
     for (int iter = 0; iter < 32; iter++) {
-        /* mid = (lo + hi) / 2  without overflow */
         fp_t mid = lo + fp_div(hi - lo, FP_TWO);
-
         fp_t p_mid = FP_ZERO;
         profile_at_time(q->profile, mid, &p_mid, NULL, NULL);
-
         if (p_mid < q->next_step_pos) {
-            lo = mid;   /* step not yet reached at mid */
+            lo = mid;
         } else {
-            hi = mid;   /* step already reached at mid */
+            hi = mid;
         }
     }
 
-    /* hi is the first time position >= next_step_pos */
     if (step_time) *step_time = hi;
 
-    /* Advance state for the next call */
     q->current_time  = hi;
     q->next_step_pos += q->step_size;
 

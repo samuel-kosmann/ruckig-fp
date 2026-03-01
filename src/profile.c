@@ -15,7 +15,7 @@
 fp_t profile_total_duration(const SCurveProfile *prof)
 {
     fp_t total = FP_ZERO;
-    for (int i = 0; i < SCURVE_SEGMENTS; i++) {
+    for (int i = 0; i < prof->n_segs; i++) {
         total += prof->t[i];
     }
     return total;
@@ -36,7 +36,7 @@ fp_t profile_total_duration(const SCurveProfile *prof)
  */
 void profile_integrate(SCurveProfile *prof)
 {
-    for (int i = 0; i < SCURVE_SEGMENTS; i++) {
+    for (int i = 0; i < prof->n_segs; i++) {
         fp_t dt  = prof->t[i];
         fp_t j   = prof->j[i];
         fp_t a0  = prof->a[i];
@@ -70,9 +70,10 @@ void profile_integrate(SCurveProfile *prof)
 void profile_at_time(const SCurveProfile *prof, fp_t t_query,
                      fp_t *pos, fp_t *vel, fp_t *acc)
 {
+    int  n     = prof->n_segs;
     fp_t total = profile_total_duration(prof);
 
-    // Clamp query time to the valid range.
+    // Clamp to [0, total] — or extrapolate for vel_mode.
     if (t_query <= FP_ZERO) {
         if (pos) *pos = prof->p[0];
         if (vel) *vel = prof->v[0];
@@ -80,20 +81,27 @@ void profile_at_time(const SCurveProfile *prof, fp_t t_query,
         return;
     }
     if (t_query >= total) {
-        if (pos) *pos = prof->p[SCURVE_SEGMENTS];
-        if (vel) *vel = prof->v[SCURVE_SEGMENTS];
-        if (acc) *acc = prof->a[SCURVE_SEGMENTS];
+        if (prof->vel_mode) {
+            // Extrapolate beyond the end: constant velocity, zero acceleration.
+            fp_t t_extra = t_query - total;
+            if (pos) *pos = prof->p[n] + fp_mul(prof->v[n], t_extra);
+            if (vel) *vel = prof->v[n];
+            if (acc) *acc = FP_ZERO;
+        } else {
+            if (pos) *pos = prof->p[n];
+            if (vel) *vel = prof->v[n];
+            if (acc) *acc = prof->a[n];
+        }
         return;
     }
 
     // Walk segments to find which one contains t_query.
     fp_t t_seg_start = FP_ZERO;
-    for (int i = 0; i < SCURVE_SEGMENTS; i++) {
+    for (int i = 0; i < n; i++) {
         fp_t t_seg_end = t_seg_start + prof->t[i];
 
-        if (t_query <= t_seg_end || i == SCURVE_SEGMENTS - 1) {
+        if (t_query <= t_seg_end || i == n - 1) {
             // t_query is within segment i.
-            // Local time dt within the segment.
             fp_t dt  = t_query - t_seg_start;
             fp_t j   = prof->j[i];
             fp_t a0  = prof->a[i];

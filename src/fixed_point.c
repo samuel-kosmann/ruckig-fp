@@ -66,8 +66,12 @@ fp_t fp_sqrt(fp_t x)
             tmp >>= 1;
             bits++;
         }
-        // r starts at 2^((bits+1)/2), a rough over-estimate.
-        r = (uint64_t)1 << ((bits + 1) / 2);
+        // Start at 2^ceil((bits+1)/2), which is always >= sqrt(n).
+        // Using (bits+2)/2 gives the ceiling, ensuring the initial estimate
+        // is an over-estimate so Newton-Raphson converges from above.
+        // (The previous (bits+1)/2 could under-estimate, causing the
+        // convergence check "r_new >= r" to fire too early.)
+        r = (uint64_t)1 << ((bits + 2) / 2);
     }
 
     // Newton-Raphson iterations converge quadratically; ~7 iterations
